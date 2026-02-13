@@ -7,3 +7,7 @@ FutureFest/ff-web-app
 FutureFest/ff-infrastructure
 FutureFest/vv-admin-app
 FutureFest/vv-web-app
+
+# Legacy realtime services (still needed in current workspace)
+FutureFest/world-socket
+FutureFest/stage-socket
