@@ -1,0 +1,9 @@
+# VirtualVenues workspace repositories (GitHub only)
+# Format: ORG/REPO
+
+FutureFest/VirtualVenuesHome
+FutureFest/ff-api
+FutureFest/ff-web-app
+FutureFest/ff-infrastructure
+FutureFest/vv-admin-app
+FutureFest/vv-web-app
