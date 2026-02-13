@@ -1,0 +1,10 @@
+# Optional Unity Version Control repositories for workspace bootstrap.
+# Format:
+# workspace_name|relative_or_absolute_target_path|repository_spec
+#
+# Example:
+# vv-unity-main|vv-unity-main|myrepo@myorganization@cloud
+#
+FutureFestXR|FutureFestXR|Cloud Repositories/FutureFestXR@1981664@unity
+FutureFestWorlds|FutureFestWorlds|Cloud Repositories/FutureFestWorlds@1981664@unity
+VirtualVenuesWorldCreator|VirtualVenuesWorldCreator|Cloud Repositories/VirtualVenuesWorldCreator@1981664@unity

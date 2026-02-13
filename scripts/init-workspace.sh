@@ -5,18 +5,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VVH_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 MANIFEST="${VVH_ROOT}/onboarding/repos.github.txt"
+UVCS_MANIFEST="${VVH_ROOT}/onboarding/repos.uvcs.txt"
 WORKSPACE_DIR="."
 NON_INTERACTIVE=0
 SKIP_AWS_CHECKS=0
 SKIP_GH_CHECKS=0
+SKIP_UVCS_CHECKS=0
 FORCE_AGENTS=0
 
 declare -a REPOS=()
+declare -a UVCS_WORKSPACE_NAMES=()
+declare -a UVCS_WORKSPACE_PATHS=()
+declare -a UVCS_REPOSITORY_SPECS=()
 declare -a GH_ACCESS_FAILURES=()
 declare -a AWS_FAILURES=()
 declare -a CLONED_REPOS=()
 declare -a SKIPPED_REPOS=()
 declare -a FAILED_CLONES=()
+declare -a CREATED_UVCS=()
+declare -a SKIPPED_UVCS=()
+declare -a FAILED_UVCS=()
 
 MANAGED_AGENTS_CONTENT="# VirtualVenues Workspace Agent Entry Point
 
@@ -35,10 +43,12 @@ Usage: init-workspace.sh [options]
 
 Options:
   --manifest <path>       Path to repo manifest file
+  --uvcs-manifest <path>  Path to UVCS manifest file
   --workspace-dir <path>  Workspace directory to operate in (default: .)
   --non-interactive       Fail fast instead of attempting interactive login
   --skip-aws-checks       Skip AWS profile preflight checks
   --skip-gh-checks        Skip GitHub auth/repo-access preflight checks
+  --skip-uvcs-checks      Skip UVCS auth preflight checks
   --force-agents          Overwrite existing AGENTS.md with managed delegate
   -h, --help              Show this help
 EOF
@@ -84,6 +94,11 @@ parse_args() {
         WORKSPACE_DIR="$2"
         shift 2
         ;;
+      --uvcs-manifest)
+        [[ $# -ge 2 ]] || fatal "--uvcs-manifest requires a value"
+        UVCS_MANIFEST="$2"
+        shift 2
+        ;;
       --non-interactive)
         NON_INTERACTIVE=1
         shift
@@ -94,6 +109,10 @@ parse_args() {
         ;;
       --skip-gh-checks)
         SKIP_GH_CHECKS=1
+        shift
+        ;;
+      --skip-uvcs-checks)
+        SKIP_UVCS_CHECKS=1
         shift
         ;;
       --force-agents)
@@ -143,6 +162,35 @@ load_manifest() {
   fi
 }
 
+load_uvcs_manifest() {
+  local line cleaned name repo_path repo_spec
+  local IFS='|'
+
+  if [[ ! -f "$UVCS_MANIFEST" ]]; then
+    fatal "UVCS manifest not found: ${UVCS_MANIFEST}"
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    cleaned="${line%%#*}"
+    cleaned="$(trim_line "$cleaned")"
+    [[ -z "$cleaned" ]] && continue
+
+    read -r name repo_path repo_spec <<< "$cleaned"
+
+    name="$(trim_line "${name:-}")"
+    repo_path="$(trim_line "${repo_path:-}")"
+    repo_spec="$(trim_line "${repo_spec:-}")"
+
+    if [[ -z "$name" || -z "$repo_path" || -z "$repo_spec" ]]; then
+      fatal "Invalid UVCS manifest entry: ${line}"
+    fi
+
+    UVCS_WORKSPACE_NAMES+=("$name")
+    UVCS_WORKSPACE_PATHS+=("$repo_path")
+    UVCS_REPOSITORY_SPECS+=("$repo_spec")
+  done < "$UVCS_MANIFEST"
+}
+
 ensure_agents_delegate() {
   local workspace_abs="$1"
   local agents_path="${workspace_abs}/AGENTS.md"
@@ -167,6 +215,31 @@ ensure_agents_delegate() {
   fi
 
   rm -f "$tmp_file"
+}
+
+check_uvcs_access() {
+  local repo_spec repserver seen_servers
+
+  seen_servers="|"
+  for repo_spec in "${UVCS_REPOSITORY_SPECS[@]}"; do
+    repserver="${repo_spec#*@}"
+    if [[ -z "$repserver" || "$repserver" == "$repo_spec" ]]; then
+      fatal "Invalid UVCS repository spec in manifest: ${repo_spec}"
+    fi
+
+    if [[ "$seen_servers" == *"|${repserver}|"* ]]; then
+      continue
+    fi
+    seen_servers="${seen_servers}${repserver}|"
+
+    if ! cm checkconnection "$repserver" >/dev/null 2>&1; then
+      fatal "UVCS check failed for ${repserver}. Authenticate and retry."
+    fi
+  done
+
+  if ! cm whoami >/dev/null 2>&1; then
+    fatal "UVCS identity check failed. Authenticate with Unity Version Control, then retry."
+  fi
 }
 
 check_gh_access() {
@@ -242,9 +315,21 @@ preflight_checks() {
   else
     log "Skipping AWS preflight checks."
   fi
+
+  if [[ ${#UVCS_WORKSPACE_NAMES[@]} -gt 0 ]]; then
+    require_cmd cm
+    if [[ "$SKIP_UVCS_CHECKS" -eq 0 ]]; then
+      check_uvcs_access
+      log "UVCS preflight checks passed."
+    else
+      log "Skipping UVCS preflight checks."
+    fi
+  else
+    log "No UVCS manifest entries found; skipping UVCS bootstrap."
+  fi
 }
 
-clone_repos() {
+clone_github_repos() {
   local workspace_abs="$1"
   local repo target_name target_path
 
@@ -268,6 +353,51 @@ clone_repos() {
   done
 }
 
+resolve_target_path() {
+  local workspace_abs="$1"
+  local repo_path="$2"
+
+  if [[ "$repo_path" = /* ]]; then
+    printf '%s' "$repo_path"
+  else
+    printf '%s/%s' "$workspace_abs" "$repo_path"
+  fi
+}
+
+init_uvcs_workspaces() {
+  local workspace_abs="$1"
+  local i workspace_name repo_path repo_spec target_path parent_path
+
+  for ((i = 0; i < ${#UVCS_WORKSPACE_NAMES[@]}; i++)); do
+    workspace_name="${UVCS_WORKSPACE_NAMES[$i]}"
+    repo_path="${UVCS_WORKSPACE_PATHS[$i]}"
+    repo_spec="${UVCS_REPOSITORY_SPECS[$i]}"
+    target_path="$(resolve_target_path "$workspace_abs" "$repo_path")"
+    parent_path="$(dirname "$target_path")"
+
+    if [[ -e "$target_path" ]]; then
+      SKIPPED_UVCS+=("$workspace_name")
+      log "Skipping existing UVCS target: ${target_path}"
+      continue
+    fi
+
+    mkdir -p "$parent_path"
+
+    if cm workspace create "$workspace_name" "$target_path" "$repo_spec" >/dev/null 2>&1; then
+      if (cd "$target_path" && cm update >/dev/null 2>&1); then
+        CREATED_UVCS+=("$workspace_name")
+        log "Created UVCS workspace ${workspace_name} at ${target_path}"
+      else
+        FAILED_UVCS+=("$workspace_name")
+        warn "Workspace created but update failed for ${workspace_name}"
+      fi
+    else
+      FAILED_UVCS+=("$workspace_name")
+      warn "Failed to create UVCS workspace ${workspace_name}"
+    fi
+  done
+}
+
 main() {
   local workspace_abs
 
@@ -279,20 +409,34 @@ main() {
 
   workspace_abs="$(cd "$WORKSPACE_DIR" && pwd)"
   MANIFEST="$(resolve_path "$MANIFEST")"
+  UVCS_MANIFEST="$(resolve_path "$UVCS_MANIFEST")"
 
   load_manifest
+  load_uvcs_manifest
   preflight_checks
   ensure_agents_delegate "$workspace_abs"
-  clone_repos "$workspace_abs"
+  clone_github_repos "$workspace_abs"
+  init_uvcs_workspaces "$workspace_abs"
 
   log "Summary:"
-  log "  Cloned:  ${#CLONED_REPOS[@]}"
-  log "  Skipped: ${#SKIPPED_REPOS[@]}"
-  log "  Failed:  ${#FAILED_CLONES[@]}"
+  log "  GitHub cloned:  ${#CLONED_REPOS[@]}"
+  log "  GitHub skipped: ${#SKIPPED_REPOS[@]}"
+  log "  GitHub failed:  ${#FAILED_CLONES[@]}"
+  log "  UVCS created:   ${#CREATED_UVCS[@]}"
+  log "  UVCS skipped:   ${#SKIPPED_UVCS[@]}"
+  log "  UVCS failed:    ${#FAILED_UVCS[@]}"
 
   if [[ ${#FAILED_CLONES[@]} -gt 0 ]]; then
-    printf '[ERROR] Clone failures:\n' >&2
+    printf '[ERROR] GitHub clone failures:\n' >&2
     printf '  - %s\n' "${FAILED_CLONES[@]}" >&2
+  fi
+
+  if [[ ${#FAILED_UVCS[@]} -gt 0 ]]; then
+    printf '[ERROR] UVCS workspace failures:\n' >&2
+    printf '  - %s\n' "${FAILED_UVCS[@]}" >&2
+  fi
+
+  if [[ ${#FAILED_CLONES[@]} -gt 0 || ${#FAILED_UVCS[@]} -gt 0 ]]; then
     exit 1
   fi
 }

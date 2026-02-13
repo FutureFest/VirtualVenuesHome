@@ -7,10 +7,12 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $vvhRoot = (Resolve-Path (Join-Path $scriptRoot "..")).Path
 
 $manifest = Join-Path $vvhRoot "onboarding/repos.github.txt"
+$uvcsManifest = Join-Path $vvhRoot "onboarding/repos.uvcs.txt"
 $workspaceDir = "."
 $nonInteractive = $false
 $skipAwsChecks = $false
 $skipGhChecks = $false
+$skipUvcsChecks = $false
 $forceAgents = $false
 
 $managedAgentsContent = @"
@@ -31,10 +33,12 @@ Usage: init-workspace.ps1 [options]
 
 Options:
   --manifest <path>       Path to repo manifest file
+  --uvcs-manifest <path>  Path to UVCS manifest file
   --workspace-dir <path>  Workspace directory to operate in (default: .)
   --non-interactive       Fail fast instead of attempting interactive login
   --skip-aws-checks       Skip AWS profile preflight checks
   --skip-gh-checks        Skip GitHub auth/repo-access preflight checks
+  --skip-uvcs-checks      Skip UVCS auth preflight checks
   --force-agents          Overwrite existing AGENTS.md with managed delegate
   -h, --help              Show this help
 "@
@@ -71,6 +75,13 @@ function Parse-Args {
         $script:manifest = $Tokens[$i + 1]
         $i += 2
       }
+      "--uvcs-manifest" {
+        if ($i + 1 -ge $Tokens.Count) {
+          Stop-Fatal "--uvcs-manifest requires a value"
+        }
+        $script:uvcsManifest = $Tokens[$i + 1]
+        $i += 2
+      }
       "--workspace-dir" {
         if ($i + 1 -ge $Tokens.Count) {
           Stop-Fatal "--workspace-dir requires a value"
@@ -88,6 +99,10 @@ function Parse-Args {
       }
       "--skip-gh-checks" {
         $script:skipGhChecks = $true
+        $i += 1
+      }
+      "--skip-uvcs-checks" {
+        $script:skipUvcsChecks = $true
         $i += 1
       }
       "--force-agents" {
@@ -133,6 +148,43 @@ function Load-Manifest([string]$ManifestPath) {
   return ,$repos
 }
 
+function Load-UvcsManifest([string]$ManifestPath) {
+  if (-not (Test-Path -LiteralPath $ManifestPath)) {
+    Stop-Fatal "UVCS manifest not found: $ManifestPath"
+  }
+
+  $entries = @()
+  foreach ($raw in Get-Content -LiteralPath $ManifestPath) {
+    $line = ($raw -replace "#.*$", "").Trim()
+    if ([string]::IsNullOrWhiteSpace($line)) {
+      continue
+    }
+
+    $parts = $line -split "\|", 3
+    if ($parts.Count -lt 3) {
+      Stop-Fatal "Invalid UVCS manifest entry: $line"
+    }
+
+    $workspaceName = $parts[0].Trim()
+    $targetPath = $parts[1].Trim()
+    $repositorySpec = $parts[2].Trim()
+
+    if ([string]::IsNullOrWhiteSpace($workspaceName) -or
+        [string]::IsNullOrWhiteSpace($targetPath) -or
+        [string]::IsNullOrWhiteSpace($repositorySpec)) {
+      Stop-Fatal "Invalid UVCS manifest entry: $line"
+    }
+
+    $entries += [PSCustomObject]@{
+      WorkspaceName = $workspaceName
+      TargetPath = $targetPath
+      RepositorySpec = $repositorySpec
+    }
+  }
+
+  return ,$entries
+}
+
 function Ensure-AgentsDelegate([string]$WorkspacePath) {
   $agentsPath = Join-Path $WorkspacePath "AGENTS.md"
   if (Test-Path -LiteralPath $agentsPath) {
@@ -168,7 +220,43 @@ function Test-AwsProfile([string]$ProfileName) {
   }
 }
 
-function Run-Preflight([string[]]$Repos) {
+function Test-UvcsAccess {
+  param([string[]]$RepositorySpecs)
+
+  $seenServers = @{}
+  foreach ($repoSpec in $RepositorySpecs) {
+    $parts = $repoSpec -split "@", 2
+    if ($parts.Count -lt 2) {
+      return $false
+    }
+    $repServer = $parts[1]
+    if ([string]::IsNullOrWhiteSpace($repServer)) {
+      return $false
+    }
+
+    if ($seenServers.ContainsKey($repServer)) {
+      continue
+    }
+    $seenServers[$repServer] = $true
+
+    try {
+      & cm checkconnection $repServer *> $null
+    }
+    catch {
+      return $false
+    }
+  }
+
+  try {
+    & cm whoami *> $null
+    return $true
+  }
+  catch {
+    return $false
+  }
+}
+
+function Run-Preflight([string[]]$Repos, $UvcsEntries) {
   Require-Command "git"
   Require-Command "gh"
   if (-not $skipAwsChecks) {
@@ -237,9 +325,26 @@ function Run-Preflight([string[]]$Repos) {
   else {
     Write-Info "Skipping AWS preflight checks."
   }
+
+  if ($UvcsEntries.Count -gt 0) {
+    Require-Command "cm"
+    $uvcsRepositorySpecs = @($UvcsEntries | ForEach-Object { $_.RepositorySpec })
+    if (-not $skipUvcsChecks) {
+      if (-not (Test-UvcsAccess -RepositorySpecs $uvcsRepositorySpecs)) {
+        Stop-Fatal "UVCS check failed. Configure Unity Version Control client and authenticate, then retry."
+      }
+      Write-Info "UVCS preflight checks passed."
+    }
+    else {
+      Write-Info "Skipping UVCS preflight checks."
+    }
+  }
+  else {
+    Write-Info "No UVCS manifest entries found; skipping UVCS bootstrap."
+  }
 }
 
-function Clone-Repos([string]$WorkspacePath, [string[]]$Repos) {
+function Clone-GithubRepos([string]$WorkspacePath, [string[]]$Repos) {
   $cloned = @()
   $skipped = @()
   $failed = @()
@@ -269,14 +374,61 @@ function Clone-Repos([string]$WorkspacePath, [string[]]$Repos) {
     }
   }
 
-  Write-Info "Summary:"
-  Write-Info "  Cloned:  $($cloned.Count)"
-  Write-Info "  Skipped: $($skipped.Count)"
-  Write-Info "  Failed:  $($failed.Count)"
+  return [PSCustomObject]@{
+    Cloned = $cloned
+    Skipped = $skipped
+    Failed = $failed
+  }
+}
 
-  if ($failed.Count -gt 0) {
-    $formatted = ($failed | ForEach-Object { "  - $_" }) -join "`n"
-    Stop-Fatal "Clone failures:`n$formatted"
+function Resolve-RepoTarget([string]$WorkspacePath, [string]$InputPath) {
+  if ([System.IO.Path]::IsPathRooted($InputPath)) {
+    return $InputPath
+  }
+  return Join-Path $WorkspacePath $InputPath
+}
+
+function Init-UvcsWorkspaces([string]$WorkspacePath, $UvcsEntries) {
+  $created = @()
+  $skipped = @()
+  $failed = @()
+
+  foreach ($entry in $UvcsEntries) {
+    $targetPath = Resolve-RepoTarget -WorkspacePath $WorkspacePath -InputPath $entry.TargetPath
+
+    if (Test-Path -LiteralPath $targetPath) {
+      $skipped += $entry.WorkspaceName
+      Write-Info "Skipping existing UVCS target: $targetPath"
+      continue
+    }
+
+    $parentPath = Split-Path -Parent $targetPath
+    if (-not [string]::IsNullOrWhiteSpace($parentPath) -and -not (Test-Path -LiteralPath $parentPath)) {
+      New-Item -ItemType Directory -Path $parentPath -Force | Out-Null
+    }
+
+    try {
+      & cm workspace create $entry.WorkspaceName $targetPath $entry.RepositorySpec *> $null
+      Push-Location $targetPath
+      try {
+        & cm update *> $null
+      }
+      finally {
+        Pop-Location
+      }
+      $created += $entry.WorkspaceName
+      Write-Info "Created UVCS workspace $($entry.WorkspaceName) at $targetPath"
+    }
+    catch {
+      $failed += $entry.WorkspaceName
+      Write-WarnLine "Failed to create or update UVCS workspace $($entry.WorkspaceName)"
+    }
+  }
+
+  return [PSCustomObject]@{
+    Created = $created
+    Skipped = $skipped
+    Failed = $failed
   }
 }
 
@@ -288,8 +440,32 @@ if (-not (Test-Path -LiteralPath $workspaceDir)) {
 
 $workspacePath = (Resolve-Path -LiteralPath $workspaceDir).Path
 $manifestPath = (Resolve-Path -LiteralPath $manifest).Path
+$uvcsManifestPath = (Resolve-Path -LiteralPath $uvcsManifest).Path
 
 $repos = Load-Manifest -ManifestPath $manifestPath
-Run-Preflight -Repos $repos
+$uvcsEntries = Load-UvcsManifest -ManifestPath $uvcsManifestPath
+Run-Preflight -Repos $repos -UvcsEntries $uvcsEntries
 Ensure-AgentsDelegate -WorkspacePath $workspacePath
-Clone-Repos -WorkspacePath $workspacePath -Repos $repos
+
+$ghResults = Clone-GithubRepos -WorkspacePath $workspacePath -Repos $repos
+$uvcsResults = Init-UvcsWorkspaces -WorkspacePath $workspacePath -UvcsEntries $uvcsEntries
+
+Write-Info "Summary:"
+Write-Info "  GitHub cloned:  $($ghResults.Cloned.Count)"
+Write-Info "  GitHub skipped: $($ghResults.Skipped.Count)"
+Write-Info "  GitHub failed:  $($ghResults.Failed.Count)"
+Write-Info "  UVCS created:   $($uvcsResults.Created.Count)"
+Write-Info "  UVCS skipped:   $($uvcsResults.Skipped.Count)"
+Write-Info "  UVCS failed:    $($uvcsResults.Failed.Count)"
+
+if ($ghResults.Failed.Count -gt 0 -or $uvcsResults.Failed.Count -gt 0) {
+  if ($ghResults.Failed.Count -gt 0) {
+    $ghFailed = ($ghResults.Failed | ForEach-Object { "  - $_" }) -join "`n"
+    Write-Error "GitHub clone failures:`n$ghFailed"
+  }
+  if ($uvcsResults.Failed.Count -gt 0) {
+    $uvcsFailed = ($uvcsResults.Failed | ForEach-Object { "  - $_" }) -join "`n"
+    Write-Error "UVCS workspace failures:`n$uvcsFailed"
+  }
+  exit 1
+}

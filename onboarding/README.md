@@ -6,14 +6,16 @@ agents working in a VirtualVenues multi-repo workspace.
 ## What you get
 
 - Standard prerequisites and authentication flow for GitHub and AWS
-- A repo manifest that defines which repositories belong in a workspace
+- Optional Unity Version Control (UVCS) bootstrap support for non-GitHub source
+- Repo manifests that define which repositories belong in a workspace
 - Bootstrap scripts for macOS/Linux (`bash`) and Windows (`PowerShell`)
 
 ## Documents
 
 - [Prerequisites](prerequisites.md)
 - [Init Workspace](init-workspace.md)
-- Repo manifest: [`repos.github.txt`](repos.github.txt)
+- GitHub repo manifest: [`repos.github.txt`](repos.github.txt)
+- UVCS repo manifest: [`repos.uvcs.txt`](repos.uvcs.txt)
 
 ## Quick start
 
@@ -35,4 +37,5 @@ agents working in a VirtualVenues multi-repo workspace.
 The scripts are idempotent:
 - Existing repo directories are skipped.
 - Missing repos are cloned.
+- Optional UVCS workspaces are created from `repos.uvcs.txt`.
 - Root `AGENTS.md` delegate is created (or warned on conflict).
