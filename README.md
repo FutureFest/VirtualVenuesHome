@@ -20,3 +20,4 @@ Use the onboarding docs to set up tools, authenticate, and bootstrap a workspace
 - [Onboarding Overview](onboarding/README.md)
 - [Prerequisites](onboarding/prerequisites.md)
 - [Init Workspace](onboarding/init-workspace.md)
+- [Work Tracking](onboarding/work-tracking.md)

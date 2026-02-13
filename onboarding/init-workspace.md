@@ -89,3 +89,10 @@ Rules:
 - Blank lines are ignored.
 - Target paths are resolved relative to workspace root unless absolute.
 - If the target path already exists, the workspace is skipped.
+
+## After bootstrap
+
+After repos are synced locally, use the shared project board for task
+selection and status tracking:
+
+- [Beam Backlog Work Tracking](work-tracking.md)

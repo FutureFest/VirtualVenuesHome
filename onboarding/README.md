@@ -9,11 +9,13 @@ agents working in a VirtualVenues multi-repo workspace.
 - Optional Unity Version Control (UVCS) bootstrap support for non-GitHub source
 - Repo manifests that define which repositories belong in a workspace
 - Bootstrap scripts for macOS/Linux (`bash`) and Windows (`PowerShell`)
+- Shared work tracking process using GitHub Project `Beam Backlog`
 
 ## Documents
 
 - [Prerequisites](prerequisites.md)
 - [Init Workspace](init-workspace.md)
+- [Work Tracking](work-tracking.md)
 - GitHub repo manifest: [`repos.github.txt`](repos.github.txt)
 - UVCS repo manifest: [`repos.uvcs.txt`](repos.uvcs.txt)
 

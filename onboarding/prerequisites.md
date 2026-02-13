@@ -60,6 +60,24 @@ Verify org/repo access:
 gh repo view FutureFest/VirtualVenuesHome --json name,url
 ```
 
+Grant GitHub Projects access (read):
+
+```bash
+gh auth refresh -h github.com -s read:project
+```
+
+If you plan to add/edit project items via CLI, grant write scope:
+
+```bash
+gh auth refresh -h github.com -s project
+```
+
+Verify project access:
+
+```bash
+gh project view 2 --owner FutureFest
+```
+
 ## AWS profile standard
 
 Use these exact profile names:
