@@ -45,6 +45,26 @@ Both scripts:
 - `--force-agents`: overwrite existing root `AGENTS.md` with managed delegate
 - `--help`: print usage
 
+## AGENTS delegate policy
+
+- Root `AGENTS.md` is a generated delegate file and should not be edited
+  directly.
+- The authoritative policy file is `VirtualVenuesHome/AGENTS.md`.
+- To update delegate text, change `VirtualVenuesHome/AGENTS.md` and both managed
+  templates in:
+  - `VirtualVenuesHome/scripts/init-workspace.sh`
+  - `VirtualVenuesHome/scripts/init-workspace.ps1`
+
+### Refresh root AGENTS delegate in an existing workspace
+
+```bash
+./VirtualVenuesHome/scripts/init-workspace.sh --force-agents
+```
+
+```powershell
+.\VirtualVenuesHome\scripts\init-workspace.ps1 --force-agents
+```
+
 ## Examples
 
 ### Run non-interactive for agents
