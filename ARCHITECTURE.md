@@ -20,6 +20,7 @@ Last verified against workspace code on **2026-02-13**.
 | Repository | Role | Status | Source Control | Main Dependencies |
 |------------|------|--------|----------------|-------------------|
 | `VirtualVenuesHome` | Shared docs, standards, onboarding/bootstrap | Active | GitHub | None (reference repo) |
+| `dex` | Dex product docs and future service implementation | Planning/bootstrap | GitHub | Slack, GitHub, future Dex-owned service/runtime dependencies |
 | `ff-api` | Core backend API (legacy + VV routes) | Active, shared | GitHub + GitLab remote present | AWS API Gateway/Lambda, DynamoDB, S3, SNS, Auth0, Stripe, Unity Cloud, external APIs |
 | `ff-infrastructure` | Terraform stacks/modules for API/Auth0/web hosting | Active | GitHub | AWS, Auth0, Terraform |
 | `ff-web-app` | Legacy FutureFest frontend | Legacy, still operational | GitHub + GitLab remote present | `ff-api`, Auth0 |

@@ -2,6 +2,7 @@
 # Format: ORG/REPO
 
 FutureFest/VirtualVenuesHome
+FutureFest/dex
 FutureFest/ff-api
 FutureFest/ff-web-app
 FutureFest/ff-infrastructure

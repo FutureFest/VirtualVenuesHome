@@ -21,6 +21,8 @@ Make changes inside the specific repository you are working on.
 ## Repositories
 - `VirtualVenuesHome`: Central shared docs/reference repo for cross-project
   architecture, terminology, and standards.
+- `dex`: Docs-first bootstrap repo for the Dex AI teammate project. Use this
+  repo for Dex product docs, HLDs, and future implementation work.
 - `ff-api`: Go API service for Future Fest. Local dev uses Docker Compose; see
   `ff-api/README.md`.
 - `ff-web-app`: React web app. Local dev uses Docker Compose; see
